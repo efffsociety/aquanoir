@@ -92,6 +92,7 @@ Rules:
 - No emojis except 🐬 at the start.
 - Prioritize breaking news and transactions from the last 30 minutes above all else. General news and notes are acceptable if from the last 6 hours. Anything older should be skipped.
 - Skip pure opinion pieces, rankings and hot takes.
+- Only use these approved sources: miamidolphins.com, nfl.com, si.com, miamiherald.com, sun-sentinel.com, palmbeachpost.com, theathletic.com, espn.com, nflnetwork.com, the33rdteam.com, thedraftnetwork.com, profootballtalk.com, profootballreference.com, nbcsports.com, patmcafeeshow.com. Reject anything from heavy.com, bleacherreport.com, fansided.com, or any fan/aggregator site.
 - For secondary sources (PFT/Mike Florio, NBC Sports/Chris Simms, Pat McAfee Show, Rich Eisen/NFL Network) only post if the content is a confirmed story break or transaction. Never post their analysis or opinions.
 - Generate one POST per distinct news item.
 - Max 5 posts per run.
@@ -114,6 +115,67 @@ def bsky_login():
     res.raise_for_status()
     data = res.json()
     return data["accessJwt"], data["did"]
+
+
+def fetch_link_card(url):
+    """Fetch Open Graph metadata for a URL to build a Bluesky link card embed."""
+    try:
+        res = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        if not res.ok:
+            return None
+        from html.parser import HTMLParser
+
+        class OGParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.og = {}
+            def handle_starttag(self, tag, attrs):
+                if tag == "meta":
+                    d = dict(attrs)
+                    prop = d.get("property", d.get("name", ""))
+                    content = d.get("content", "")
+                    if prop in ("og:title", "og:description", "og:image", "og:url"):
+                        self.og[prop] = content
+
+        parser = OGParser()
+        parser.feed(res.text[:20000])
+        og = parser.og
+
+        title = og.get("og:title", "")
+        description = og.get("og:description", "")
+        thumb_url = og.get("og:image", "")
+        canonical = og.get("og:url", url)
+
+        if not title:
+            return None
+
+        card = {
+            "$type": "app.bsky.embed.external",
+            "external": {
+                "uri": canonical,
+                "title": title[:300],
+                "description": description[:1000],
+            }
+        }
+
+        # Fetch and upload thumbnail if available
+        if thumb_url:
+            try:
+                img_res = requests.get(thumb_url, timeout=6)
+                if img_res.ok:
+                    content_type = img_res.headers.get("content-type", "image/jpeg").split(";")[0]
+                    card["external"]["thumb"] = {
+                        "$type": "blob",
+                        "mimeType": content_type,
+                        "data": img_res.content
+                    }
+            except Exception:
+                pass
+
+        return card
+    except Exception as e:
+        print(f"Link card fetch error: {e}")
+        return None
 
 
 def truncate_post(text, limit=280):
@@ -334,9 +396,13 @@ def generate_posts(articles, log):
         already = "\n".join(f"- {e['text']}" for e in recent)
         news_text += f"\nALREADY POSTED — do not repeat:\n{already}\n"
 
-    user_prompt = f"""Search the web for the latest Miami Dolphins news from the last 24 hours, then combine with these NewsAPI articles to generate posts. Prioritize verified beat reporters and official sources only.
+    from datetime import timezone
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    user_prompt = f"""Current time: {now_str}
 
-NewsAPI articles:
+Search the web for Miami Dolphins news published in the last 6 hours only. For breaking transactions, injuries or signings prioritize anything from the last 30 minutes. Ignore anything older than 6 hours. Only use approved beat reporters and official sources.
+
+NewsAPI articles (pre-filtered to last 6 hours):
 {news_text}
 
 Generate the digest thread now."""
@@ -769,12 +835,13 @@ def run():
             # Small delay between posts
             time.sleep(2)
 
-            # Post 2: source link as reply
+            # Post 2: source link as reply with card preview
             reply_ref = {
                 "root": {"uri": post_uri, "cid": post_cid},
                 "parent": {"uri": post_uri, "cid": post_cid}
             }
-            bsky_post(jwt, did, post['url'], reply_to=reply_ref)
+            link_card = fetch_link_card(post['url'])
+            bsky_post(jwt, did, post['url'], reply_to=reply_ref, embed=link_card)
 
             # Log it
             mark_posted(log, post["fact"], post["url"])
