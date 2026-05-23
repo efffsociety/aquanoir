@@ -172,7 +172,9 @@ def bsky_post(jwt, did, text, reply_to=None):
             "record": record
         }
     )
-    res.raise_for_status()
+    if not res.ok:
+        print(f"Bluesky error {res.status_code}: {res.text}")
+        res.raise_for_status()
     return res.json()
 
 # ── Posted log ────────────────────────────────────────────────────────────────
