@@ -85,7 +85,9 @@ Given a list of Dolphins news items, generate posts. Each post follows this exac
 
 POST:
 🐬 [fact from the article. One or two sentences max. No speculation.]
+
 [One genuine question that makes the reader think. Not cynical. Not speculative. Just curious.]
+
 #NFL #MiamiDolphins #FinsUp
 SOURCE_URL: [the article url]
 
@@ -120,13 +122,40 @@ def bsky_login():
     return data["accessJwt"], data["did"]
 
 
+def detect_facets(text):
+    """Detect hashtags in text and return AT Protocol facets for clickable links."""
+    import re
+    facets = []
+    # Encode text to bytes for correct byte offsets
+    text_bytes = text.encode("utf-8")
+    for match in re.finditer(r"#[a-zA-Z0-9]+", text):
+        tag = match.group()[1:]  # strip the #
+        start_bytes = len(text[:match.start()].encode("utf-8"))
+        end_bytes = len(text[:match.end()].encode("utf-8"))
+        facets.append({
+            "index": {
+                "byteStart": start_bytes,
+                "byteEnd": end_bytes
+            },
+            "features": [{
+                "$type": "app.bsky.richtext.facet#tag",
+                "tag": tag
+            }]
+        })
+    return facets
+
+
 def bsky_post(jwt, did, text, reply_to=None):
     """Post a skeet. If reply_to is set, post as a thread reply."""
+    facets = detect_facets(text)
     record = {
         "$type": "app.bsky.feed.post",
         "text": text,
         "createdAt": datetime.now(timezone.utc).isoformat()
     }
+
+    if facets:
+        record["facets"] = facets
 
     if reply_to:
         record["reply"] = {
