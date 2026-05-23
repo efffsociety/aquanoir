@@ -282,20 +282,19 @@ def fetch_news():
 # ── Claude digest generation ──────────────────────────────────────────────────
 
 def generate_posts(articles, log):
-    if not articles:
-        print("No articles fetched.")
-        return []
-
     client = Anthropic(api_key=ANTHROPIC_KEY)
 
-    # Build news context
+    # Build context from NewsAPI articles
     news_text = ""
-    for a in articles:
-        news_text += f"TITLE: {a['title']}\n"
-        news_text += f"URL: {a['url']}\n"
-        if a.get("description"):
-            news_text += f"DESCRIPTION: {a['description']}\n"
-        news_text += "\n"
+    if articles:
+        for a in articles:
+            news_text += f"TITLE: {a['title']}\n"
+            news_text += f"URL: {a['url']}\n"
+            if a.get("description"):
+                news_text += f"DESCRIPTION: {a['description']}\n"
+            news_text += "\n"
+    else:
+        news_text = "No NewsAPI articles available. Use web search to find recent Miami Dolphins news.\n"
 
     # Add already-posted context to avoid repeats
     if log:
@@ -303,22 +302,36 @@ def generate_posts(articles, log):
         already = "\n".join(f"- {e['text']}" for e in recent)
         news_text += f"\nALREADY POSTED — do not repeat:\n{already}\n"
 
+    user_prompt = f"""Search the web for the latest Miami Dolphins news from the last 24 hours, then combine with these NewsAPI articles to generate posts. Prioritize verified beat reporters and official sources only.
+
+NewsAPI articles:
+{news_text}
+
+Generate the digest thread now."""
+
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1500,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": news_text}]
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        messages=[{"role": "user", "content": user_prompt}]
     )
 
-    raw = message.content[0].text.strip()
+    # Extract text from response — may include tool use blocks
+    raw = ""
+    for block in message.content:
+        if hasattr(block, "type") and block.type == "text":
+            raw += block.text
 
-    if raw == "NO_NEWS":
+    raw = raw.strip()
+
+    if not raw or raw == "NO_NEWS":
         print("Claude found no new worthy news.")
         return []
 
     # Parse POST blocks
     posts = []
-    blocks = raw.split("POST:")[1:]  # Split on POST: marker
+    blocks = raw.split("POST:")[1:]
     for block in blocks:
         lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
         fact_lines = []
@@ -335,7 +348,7 @@ def generate_posts(articles, log):
             if not already_posted(log, fact_text):
                 posts.append({"fact": fact_text, "url": url})
 
-    return posts[:5]  # Max 5 per run
+    return posts[:5]
 
 # ── Game day post ────────────────────────────────────────────────────────────
 
