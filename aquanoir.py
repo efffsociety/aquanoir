@@ -90,7 +90,7 @@ Rules:
 - Facts only. Transactions, signings, injuries, official statements. No analysis, no implications, no "this means" commentary.
 - No opinions, no analysis beyond what is in the article.
 - No emojis except 🐬 at the start.
-- Prioritize transactions, injuries, depth chart moves and scheme notes from beat reporters.
+- Prioritize breaking news and transactions from the last 30 minutes above all else. General news and notes are acceptable if from the last 6 hours. Anything older should be skipped.
 - Skip pure opinion pieces, rankings and hot takes.
 - For secondary sources (PFT/Mike Florio, NBC Sports/Chris Simms, Pat McAfee Show, Rich Eisen/NFL Network) only post if the content is a confirmed story break or transaction. Never post their analysis or opinions.
 - Generate one POST per distinct news item.
@@ -287,7 +287,29 @@ def fetch_news():
             seen.add(a["url"])
             unique.append(a)
 
-    return unique[:20]  # Cap at 20 for Claude context
+    # Filter by recency — drop anything older than 6 hours
+    from datetime import timezone
+    cutoff = datetime.now(timezone.utc).timestamp() - (6 * 3600)
+    fresh = []
+    for a in unique:
+        pub = a.get("published", "")
+        if not pub:
+            fresh.append(a)  # No date — include it, let Claude judge
+            continue
+        try:
+            from email.utils import parsedate_to_datetime
+            import dateutil.parser
+            try:
+                dt = dateutil.parser.parse(pub)
+            except Exception:
+                dt = parsedate_to_datetime(pub)
+            if dt.timestamp() >= cutoff:
+                fresh.append(a)
+        except Exception:
+            fresh.append(a)  # Can't parse date — include it
+
+    print(f"Articles after 6hr freshness filter: {len(fresh)} of {len(unique)}")
+    return fresh[:20]  # Cap at 20 for Claude context
 
 # ── Claude digest generation ──────────────────────────────────────────────────
 
