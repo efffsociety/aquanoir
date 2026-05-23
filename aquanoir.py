@@ -82,14 +82,12 @@ Given a list of Dolphins news items, generate posts. Each post follows this exac
 POST:
 🐬 [fact from the article. One or two sentences max. No speculation.]
 
-[One genuine question that makes the reader think. Not cynical. Not speculative. Just curious.]
 
 #NFL #MiamiDolphins #FinsUp
 SOURCE_URL: [the article url]
 
 Rules:
-- Facts only. Nothing not stated in the source.
-- Question must be genuine curiosity not rhetorical snark.
+- Facts only. Transactions, signings, injuries, official statements. No analysis, no implications, no "this means" commentary.
 - No opinions, no analysis beyond what is in the article.
 - No emojis except 🐬 at the start.
 - Prioritize transactions, injuries, depth chart moves and scheme notes from beat reporters.
@@ -741,7 +739,7 @@ def run():
 
     for post in posts:
         try:
-            # Post 1: fact + question
+            # Post 1: fact
             result = bsky_post(jwt, did, post["fact"])
             post_uri = result["uri"]
             post_cid = result["cid"]
@@ -754,7 +752,7 @@ def run():
                 "root": {"uri": post_uri, "cid": post_cid},
                 "parent": {"uri": post_uri, "cid": post_cid}
             }
-            bsky_post(jwt, did, f"Source: {post['url']}", reply_to=reply_ref)
+            bsky_post(jwt, did, post['url'], reply_to=reply_ref)
 
             # Log it
             mark_posted(log, post["fact"], post["url"])
