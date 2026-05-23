@@ -59,11 +59,7 @@ SECONDARY_SOURCES = [
 ]
 
 SEARCH_QUERIES = [
-    "Miami Dolphins news today",
-    "Miami Dolphins roster moves",
-    "Miami Dolphins injury report",
-    "Miami Dolphins OTA practice",
-    "Miami Dolphins beat reporter",
+    "Miami Dolphins",
 ]
 
 # Official outlets only — used to detect new beat writers covering the team
