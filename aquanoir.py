@@ -118,32 +118,44 @@ def bsky_login():
     return data["accessJwt"], data["did"]
 
 
-def detect_facets(text):
-    """Detect hashtags in text and return AT Protocol facets for clickable links."""
+def truncate_post(text, limit=280):
+    """Truncate post to fit Bluesky 300 grapheme limit."""
+    if len(text) <= limit:
+        return text
+    return text[:limit - 3] + "..."
+
+
+def build_facets(text):
+    """Build Bluesky facets for clickable hashtags and URLs."""
     import re
     facets = []
-    # Encode text to bytes for correct byte offsets
-    text_bytes = text.encode("utf-8")
-    for match in re.finditer(r"#[a-zA-Z0-9]+", text):
-        tag = match.group()[1:]  # strip the #
-        start_bytes = len(text[:match.start()].encode("utf-8"))
-        end_bytes = len(text[:match.end()].encode("utf-8"))
+
+    # Hashtags
+    for match in re.finditer(r'#[\w]+', text):
+        start = len(text[:match.start()].encode("utf-8"))
+        end = len(text[:match.end()].encode("utf-8"))
         facets.append({
-            "index": {
-                "byteStart": start_bytes,
-                "byteEnd": end_bytes
-            },
-            "features": [{
-                "$type": "app.bsky.richtext.facet#tag",
-                "tag": tag
-            }]
+            "index": {"byteStart": start, "byteEnd": end},
+            "features": [{"$type": "app.bsky.richtext.facet#tag", "tag": match.group()[1:]}]
         })
+
+    # URLs
+    for match in re.finditer(r'https?://[^\s]+', text):
+        url = match.group().rstrip('/.,;:)')
+        start = len(text[:match.start()].encode("utf-8"))
+        end = start + len(url.encode("utf-8"))
+        facets.append({
+            "index": {"byteStart": start, "byteEnd": end},
+            "features": [{"$type": "app.bsky.richtext.facet#link", "uri": url}]
+        })
+
     return facets
 
 
 def bsky_post(jwt, did, text, reply_to=None):
     """Post a skeet. If reply_to is set, post as a thread reply."""
-    facets = detect_facets(text)
+    text = truncate_post(text)
+    facets = build_facets(text)
     record = {
         "$type": "app.bsky.feed.post",
         "text": text,
