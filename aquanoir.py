@@ -742,7 +742,9 @@ def run():
             time.sleep(3)  # Space out posts
 
         except Exception as e:
+            import traceback
             print(f"Error posting: {e}")
+            print(traceback.format_exc())
             continue
 
     save_log(log)
