@@ -471,8 +471,7 @@ def build_kickoff_post(event):
         lines.append(weather_line)
     lines.extend(["", tv_display])
 
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 def maybe_post_kickoff(jwt, did, log, event):
@@ -546,8 +545,7 @@ def build_inactives_post(team_name, inactives, elevations):
         lines.append("")
         lines.append("Game Day Elevations")
         lines.extend(elevations)
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 def maybe_post_inactives(jwt, did, log, event):
