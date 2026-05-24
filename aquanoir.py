@@ -349,7 +349,6 @@ def fetch_news():
             unique.append(a)
 
     # Filter by recency — drop anything older than 6 hours
-    from datetime import timezone
     cutoff = datetime.now(timezone.utc).timestamp() - (6 * 3600)
     fresh = []
     for a in unique:
@@ -374,6 +373,29 @@ def fetch_news():
 
 # ── Claude digest generation ──────────────────────────────────────────────────
 
+def should_run_web_search():
+    """Only run web search every 6 hours to save costs."""
+    web_search_log = "/data/aquanoir_websearch.json"
+    try:
+        with open(web_search_log, "r") as f:
+            data = json.load(f)
+        last_run = datetime.fromisoformat(data.get("last_run", "2000-01-01T00:00:00+00:00"))
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=timezone.utc)
+        hours_since = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
+        return hours_since >= 6
+    except Exception:
+        return True
+
+
+def mark_web_search_ran():
+    """Record that web search just ran."""
+    web_search_log = "/data/aquanoir_websearch.json"
+    os.makedirs(os.path.dirname(web_search_log), exist_ok=True)
+    with open(web_search_log, "w") as f:
+        json.dump({"last_run": datetime.now(timezone.utc).isoformat()}, f)
+
+
 def generate_posts(articles, log):
     client = Anthropic(api_key=ANTHROPIC_KEY)
 
@@ -387,7 +409,7 @@ def generate_posts(articles, log):
                 news_text += f"DESCRIPTION: {a['description']}\n"
             news_text += "\n"
     else:
-        news_text = "No NewsAPI articles available. Use web search to find recent Miami Dolphins news.\n"
+        news_text = "No NewsAPI articles available.\n"
 
     # Add already-posted context to avoid repeats
     if log:
@@ -395,26 +417,45 @@ def generate_posts(articles, log):
         already = "\n".join(f"- {e['text']}" for e in recent)
         news_text += f"\nALREADY POSTED — do not repeat:\n{already}\n"
 
-    from datetime import timezone
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    user_prompt = f"""Current time: {now_str}
+    use_web_search = should_run_web_search()
 
-Search for Miami Dolphins news in the last 6 hours. One search query only. Return max 3 results. Approved sources only.
+    if use_web_search:
+        print("Running web search cycle (6hr)...")
+        tools = [{"type": "web_search_20250305", "name": "web_search"}]
+        user_prompt = f"""Current time: {now_str}
+
+Search for Miami Dolphins news from approved beat reporters in the last 6 hours. One search only. Focus on si.com, miamiherald.com, theathletic.com and palmbeachpost.com which are not always in NewsAPI.
 
 NewsAPI articles:
 {news_text}
 
 Generate posts now. Max 3 posts."""
+    else:
+        print("Running NewsAPI/RSS cycle (30min)...")
+        tools = []
+        user_prompt = f"""Current time: {now_str}
 
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=600,
-        system=SYSTEM_PROMPT,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": user_prompt}]
-    )
+Using only the NewsAPI articles below, generate posts for any new Miami Dolphins news not already posted. Max 3 posts.
 
-    # Extract text from response — may include tool use blocks
+NewsAPI articles:
+{news_text}"""
+
+    kwargs = {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 600,
+        "system": SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": user_prompt}]
+    }
+    if tools:
+        kwargs["tools"] = tools
+
+    message = client.messages.create(**kwargs)
+
+    if use_web_search:
+        mark_web_search_ran()
+
+    # Extract text from response
     raw = ""
     for block in message.content:
         if hasattr(block, "type") and block.type == "text":
