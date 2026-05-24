@@ -34,7 +34,7 @@ APPROVED_SOURCES = [
     "miamidolphins.com",
     "nfl.com",
     # Beat reporters / outlets
-    "si.com",              # Alain Poupart
+    "si.com",              # Alain Poupart, Jacob Westendorf
     "miamiherald.com",     # Isaiah Smalls, Barry Jackson, Omar Kelly
     "sun-sentinel.com",    # Chris Perkins, David Furones
     "palmbeachpost.com",   # Joe Schad
