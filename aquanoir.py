@@ -80,8 +80,7 @@ Been watching since Marino retired. January 26, 2000.
 Given a list of Dolphins news items, generate posts. Each post follows this exact format:
 
 POST:
-🐬 [fact from the article. One or two sentences max. No speculation.]
-
+🐬 [fact from the article. One sentence max. No speculation. Under 180 characters.]
 
 #NFL #MiamiDolphins #FinsUp
 SOURCE_URL: [the article url]
@@ -95,7 +94,7 @@ Rules:
 - Only use these approved sources: miamidolphins.com, nfl.com, si.com, miamiherald.com, sun-sentinel.com, palmbeachpost.com, theathletic.com, espn.com, nflnetwork.com, the33rdteam.com, thedraftnetwork.com, profootballtalk.com, profootballreference.com, nbcsports.com, patmcafeeshow.com. Reject anything from heavy.com, bleacherreport.com, fansided.com, or any fan/aggregator site.
 - For secondary sources (PFT/Mike Florio, NBC Sports/Chris Simms, Pat McAfee Show, Rich Eisen/NFL Network) only post if the content is a confirmed story break or transaction. Never post their analysis or opinions.
 - Generate one POST per distinct news item.
-- Max 5 posts per run.
+- Max 3 posts per run.
 - If no new worthy news, output: NO_NEWS.
 - Never use hyphens or em dashes.
 - Never use Oxford commas.
@@ -400,16 +399,16 @@ def generate_posts(articles, log):
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     user_prompt = f"""Current time: {now_str}
 
-Search the web for Miami Dolphins news published in the last 6 hours only. For breaking transactions, injuries or signings prioritize anything from the last 30 minutes. Ignore anything older than 6 hours. Only use approved beat reporters and official sources.
+Search for Miami Dolphins news in the last 6 hours. One search query only. Return max 3 results. Approved sources only.
 
-NewsAPI articles (pre-filtered to last 6 hours):
+NewsAPI articles:
 {news_text}
 
-Generate the digest thread now."""
+Generate posts now. Max 3 posts."""
 
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1500,
+        max_tokens=600,
         system=SYSTEM_PROMPT,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": user_prompt}]
@@ -446,7 +445,7 @@ Generate the digest thread now."""
             if not already_posted(log, fact_text):
                 posts.append({"fact": fact_text, "url": url})
 
-    return posts[:5]
+    return posts[:3]
 
 # ── Game day post ────────────────────────────────────────────────────────────
 
@@ -827,8 +826,15 @@ def run():
 
     for post in posts:
         try:
-            # Post 1: fact
-            result = bsky_post(jwt, did, post["fact"])
+            # Post 1: fact — hard truncate fact text before hashtags
+            fact_text = post["fact"]
+            hashtags = "\n\n#NFL #MiamiDolphins #FinsUp"
+            # Ensure fact fits with hashtags
+            max_fact = 280 - len(hashtags)
+            if len(fact_text) > max_fact:
+                fact_text = fact_text[:max_fact - 3] + "..."
+            full_text = fact_text + hashtags
+            result = bsky_post(jwt, did, full_text)
             post_uri = result["uri"]
             post_cid = result["cid"]
 
@@ -840,7 +846,11 @@ def run():
                 "root": {"uri": post_uri, "cid": post_cid},
                 "parent": {"uri": post_uri, "cid": post_cid}
             }
-            link_card = fetch_link_card(post['url'])
+            try:
+                link_card = fetch_link_card(post['url'])
+            except Exception as e:
+                print(f"Link card error: {e}")
+                link_card = None
             bsky_post(jwt, did, post['url'], reply_to=reply_ref, embed=link_card)
 
             # Log it
