@@ -422,7 +422,7 @@ def generate_posts(articles, log):
 
     if use_web_search:
         print("Running web search cycle (6hr)...")
-        tools = [{"type": "web_search_20250305", "name": "web_search"}]
+        tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
         user_prompt = f"""Current time: {now_str}
 
 Search for Miami Dolphins news from approved beat reporters in the last 6 hours. One search only. Focus on si.com, miamiherald.com, theathletic.com and palmbeachpost.com which are not always in NewsAPI.
