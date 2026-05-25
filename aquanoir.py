@@ -467,6 +467,7 @@ NewsAPI articles:
             raw += block.text
 
     raw = raw.strip()
+    print(f"Claude raw output: {raw[:300]}")
 
     if not raw or raw == "NO_NEWS":
         print("Claude found no new worthy news.")
