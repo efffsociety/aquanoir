@@ -374,7 +374,7 @@ def should_run_web_search():
         if last_run.tzinfo is None:
             last_run = last_run.replace(tzinfo=timezone.utc)
         hours_since = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
-        return True  # TEMP: force web search
+        return hours_since >= 6
     except Exception:
         return True
 
@@ -416,7 +416,7 @@ def generate_posts(articles, log):
         tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
         user_prompt = f"""Current time: {now_str}
 
-Search for Miami Dolphins news from approved beat reporters in the last 6 hours. One search only. Focus on si.com, miamiherald.com, theathletic.com and palmbeachpost.com which are not always in NewsAPI.
+Search for Miami Dolphins news from approved beat reporters in the last 48 hours. One search only. Focus on si.com, miamiherald.com, theathletic.com and palmbeachpost.com which are not always in NewsAPI. Prioritize anything from the last 6 hours but include anything up to 48 hours old if it has not been posted yet.
 
 NewsAPI articles:
 {news_text}
@@ -835,8 +835,7 @@ def check_for_new_writers(articles):
 def run():
     print(f"[{datetime.now().isoformat()}] Aqua Noir running...")
 
-    log = []
-    save_log(log)  # TEMP: clear log to test formatting — remove after one run
+    log = load_log()
     articles = fetch_news()
     print(f"Fetched {len(articles)} articles from approved sources.")
 
