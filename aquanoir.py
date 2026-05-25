@@ -312,35 +312,35 @@ def fetch_news():
                         })
             except Exception as e:
                 print(f"NewsAPI error for '{query}': {e}")
-    # Always run RSS regardless of NewsAPI — not a fallback, a parallel source
-    if True:
-        import xml.etree.ElementTree as ET
-        rss_feeds = [
-            "https://www.miamidolphins.com/rss/news",
-            "https://www.profootballtalk.com/feed/",
-            "https://www.espn.com/espn/rss/nfl/news",
-            "https://www.nfl.com/rss/rsslanding?searchString=miami+dolphins",
-            "https://syndication.bleacherreport.com/streams/teams/nfl-miami-dolphins.rss",
-        ]
-        for feed_url in rss_feeds:
-            try:
-                res = requests.get(feed_url, timeout=10, headers={"User-Agent": "Mozilla/5.0 (compatible; AquaNoirBot/1.0)"})
-                root = ET.fromstring(res.content)
-                items = root.findall(".//item")
-                print(f"RSS {feed_url.split('/')[2]}: {len(items)} items")
-                for item in items[:10]:
-                    title = item.findtext("title", "")
-                    link = item.findtext("link", "")
-                    desc = item.findtext("description", "")
-                    if title and link:
-                        articles.append({
-                            "title": title,
-                            "description": desc,
-                            "url": link,
-                            "published": item.findtext("pubDate", "")
-                        })
-            except Exception as e:
-                print(f"RSS error for {feed_url.split('/')[2]}: {e}")
+    # Always run RSS regardless of NewsAPI — parallel source
+    print("Starting RSS fetch...")
+    import xml.etree.ElementTree as ET
+    rss_feeds = [
+        "https://www.miamidolphins.com/rss/news",
+        "https://www.profootballtalk.com/feed/",
+        "https://www.espn.com/espn/rss/nfl/news",
+        "https://www.nfl.com/rss/rsslanding?searchString=miami+dolphins",
+    ]
+    for feed_url in rss_feeds:
+        try:
+            res = requests.get(feed_url, timeout=10, headers={"User-Agent": "Mozilla/5.0 (compatible; AquaNoirBot/1.0)"})
+            print(f"RSS {feed_url.split('/')[2]}: status {res.status_code}")
+            root = ET.fromstring(res.content)
+            items = root.findall(".//item")
+            print(f"RSS {feed_url.split('/')[2]}: {len(items)} items")
+            for item in items[:10]:
+                title = item.findtext("title", "")
+                link = item.findtext("link", "")
+                desc = item.findtext("description", "")
+                if title and link:
+                    articles.append({
+                        "title": title,
+                        "description": desc,
+                        "url": link,
+                        "published": item.findtext("pubDate", "")
+                    })
+        except Exception as e:
+            print(f"RSS error for {feed_url.split('/')[2]}: {e}")
 
     # Deduplicate by URL
     seen = set()
