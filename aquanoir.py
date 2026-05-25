@@ -388,7 +388,7 @@ def should_run_web_search():
         if last_run.tzinfo is None:
             last_run = last_run.replace(tzinfo=timezone.utc)
         hours_since = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
-        return hours_since >= 6
+        return True  # TEMP: force web search
     except Exception:
         return True
 
