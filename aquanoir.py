@@ -157,20 +157,6 @@ def fetch_link_card(url):
             }
         }
 
-        # Fetch and upload thumbnail if available
-        if thumb_url:
-            try:
-                img_res = requests.get(thumb_url, timeout=6)
-                if img_res.ok:
-                    content_type = img_res.headers.get("content-type", "image/jpeg").split(";")[0]
-                    card["external"]["thumb"] = {
-                        "$type": "blob",
-                        "mimeType": content_type,
-                        "data": img_res.content
-                    }
-            except Exception:
-                pass
-
         return card
     except Exception as e:
         print(f"Link card fetch error: {e}")
