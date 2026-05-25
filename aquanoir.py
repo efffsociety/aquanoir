@@ -324,9 +324,11 @@ def fetch_news():
         ]
         for feed_url in rss_feeds:
             try:
-                res = requests.get(feed_url, timeout=10)
+                res = requests.get(feed_url, timeout=10, headers={"User-Agent": "Mozilla/5.0 (compatible; AquaNoirBot/1.0)"})
                 root = ET.fromstring(res.content)
-                for item in root.findall(".//item")[:10]:
+                items = root.findall(".//item")
+                print(f"RSS {feed_url.split('/')[2]}: {len(items)} items")
+                for item in items[:10]:
                     title = item.findtext("title", "")
                     link = item.findtext("link", "")
                     desc = item.findtext("description", "")
@@ -338,7 +340,7 @@ def fetch_news():
                             "published": item.findtext("pubDate", "")
                         })
             except Exception as e:
-                print(f"RSS error for {feed_url}: {e}")
+                print(f"RSS error for {feed_url.split('/')[2]}: {e}")
 
     # Deduplicate by URL
     seen = set()
