@@ -448,14 +448,18 @@ NewsAPI articles:
 
     kwargs = {
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 600,
+        "max_tokens": 1024,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": user_prompt}]
     }
     if tools:
         kwargs["tools"] = tools
 
-    message = client.messages.create(**kwargs)
+    try:
+        message = client.messages.create(**kwargs)
+    except Exception as e:
+        print(f"Claude API error: {e}")
+        return []
 
     if use_web_search:
         mark_web_search_ran()
