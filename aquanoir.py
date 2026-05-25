@@ -461,6 +461,7 @@ NewsAPI articles:
         mark_web_search_ran()
 
     # Extract text from response
+    print(f"Response blocks: {[(b.type if hasattr(b, 'type') else str(b)) for b in message.content]}")
     raw = ""
     for block in message.content:
         if hasattr(block, "type") and block.type == "text":
