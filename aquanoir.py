@@ -348,8 +348,8 @@ def fetch_news():
             seen.add(a["url"])
             unique.append(a)
 
-    # Filter by recency — drop anything older than 6 hours
-    cutoff = datetime.now(timezone.utc).timestamp() - (6 * 3600)
+    # Filter by recency — drop anything older than 48 hours
+    cutoff = datetime.now(timezone.utc).timestamp() - (48 * 3600)
     fresh = []
     for a in unique:
         pub = a.get("published", "")
@@ -368,7 +368,7 @@ def fetch_news():
         except Exception:
             fresh.append(a)  # Can't parse date — include it
 
-    print(f"Articles after 6hr freshness filter: {len(fresh)} of {len(unique)}")
+    print(f"Articles after 48hr freshness filter: {len(fresh)} of {len(unique)}")
     return fresh[:20]  # Cap at 20 for Claude context
 
 # ── Claude digest generation ──────────────────────────────────────────────────
