@@ -840,8 +840,8 @@ def check_for_new_writers(articles):
 def run():
     print(f"[{datetime.now().isoformat()}] Aqua Noir running...")
 
-    log = load_log()
-    print(f"Posted log entries: {len(log)}")
+    log = []
+    save_log(log)  # TODO: remove after one run — clears posted log
     articles = fetch_news()
     print(f"Fetched {len(articles)} articles from approved sources.")
 
