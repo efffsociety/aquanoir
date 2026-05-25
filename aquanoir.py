@@ -312,8 +312,8 @@ def fetch_news():
                         })
             except Exception as e:
                 print(f"NewsAPI error for '{query}': {e}")
-    else:
-        # RSS fallback — official Dolphins feed always works
+    # Always run RSS regardless of NewsAPI — not a fallback, a parallel source
+    if True:
         import xml.etree.ElementTree as ET
         rss_feeds = [
             "https://www.miamidolphins.com/rss/news",
