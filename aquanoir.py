@@ -89,7 +89,7 @@ Rules:
 - Facts only. Transactions, signings, injuries, official statements. No analysis, no implications, no "this means" commentary.
 - No opinions, no analysis beyond what is in the article.
 - No emojis except 🐬 at the start.
-- Prioritize breaking news and transactions from the last 30 minutes above all else. General news and notes are acceptable if from the last 6 hours. Anything older should be skipped.
+- Prioritize breaking news and transactions from the last 6 hours above all else. Beat writer features and analysis are acceptable if from the last 48 hours. Anything older should be skipped.
 - Skip pure opinion pieces, rankings and hot takes.
 - Only use these approved sources: miamidolphins.com, nfl.com, si.com, miamiherald.com, sun-sentinel.com, palmbeachpost.com, theathletic.com, espn.com, nflnetwork.com, the33rdteam.com, thedraftnetwork.com, profootballtalk.com, profootballreference.com, nbcsports.com, patmcafeeshow.com. Reject anything from heavy.com, bleacherreport.com, fansided.com, or any fan/aggregator site.
 - For secondary sources (PFT/Mike Florio, NBC Sports/Chris Simms, Pat McAfee Show, Rich Eisen/NFL Network) only post if the content is a confirmed story break or transaction. Never post their analysis or opinions.
