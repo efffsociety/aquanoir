@@ -211,7 +211,7 @@ def build_facets(text):
     return facets
 
 
-def bsky_post(jwt, did, text, reply_to=None):
+def bsky_post(jwt, did, text, reply_to=None, embed=None):
     """Post a skeet. If reply_to is set, post as a thread reply."""
     text = truncate_post(text)
     facets = build_facets(text)
@@ -223,6 +223,9 @@ def bsky_post(jwt, did, text, reply_to=None):
 
     if facets:
         record["facets"] = facets
+
+    if embed:
+        record["embed"] = embed
 
     if reply_to:
         record["reply"] = {
@@ -385,7 +388,7 @@ def should_run_web_search():
         if last_run.tzinfo is None:
             last_run = last_run.replace(tzinfo=timezone.utc)
         hours_since = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
-        return True  # TODO: restore to hours_since >= 6
+        return hours_since >= 6
     except Exception:
         return True
 
@@ -840,8 +843,7 @@ def check_for_new_writers(articles):
 def run():
     print(f"[{datetime.now().isoformat()}] Aqua Noir running...")
 
-    log = []
-    save_log(log)  # TODO: remove after one run — clears posted log
+    log = load_log()
     articles = fetch_news()
     print(f"Fetched {len(articles)} articles from approved sources.")
 
@@ -870,10 +872,11 @@ def run():
 
     for post in posts:
         try:
-            # Post 1: fact — hard truncate fact text before hashtags
+            # Post 1: fact — strip any hashtags Claude added, then append our own
+            import re
             fact_text = post["fact"]
+            fact_text = re.sub(r'#[\w]+', '', fact_text).strip()
             hashtags = "\n\n#NFL #MiamiDolphins #FinsUp"
-            # Ensure fact fits with hashtags
             max_fact = 280 - len(hashtags)
             if len(fact_text) > max_fact:
                 fact_text = fact_text[:max_fact - 3] + "..."
