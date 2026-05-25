@@ -841,6 +841,7 @@ def run():
     print(f"[{datetime.now().isoformat()}] Aqua Noir running...")
 
     log = load_log()
+    print(f"Posted log entries: {len(log)}")
     articles = fetch_news()
     print(f"Fetched {len(articles)} articles from approved sources.")
 
