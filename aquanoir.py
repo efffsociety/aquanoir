@@ -417,9 +417,14 @@ def generate_posts(articles, log):
     if use_web_search:
         print("Running web search cycle (6hr)...")
         tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
+        # Get today and yesterday for specific date search
+        from datetime import timedelta
+        today = datetime.now(timezone.utc).strftime("%B %d %Y")
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%B %d %Y")
+
         user_prompt = f"""Current time: {now_str}
 
-Search for Miami Dolphins news from approved beat reporters in the last 48 hours. One search only. Focus on si.com, miamiherald.com, theathletic.com and palmbeachpost.com which are not always in NewsAPI. Prioritize anything from the last 6 hours but include anything up to 48 hours old if it has not been posted yet.
+Search for Miami Dolphins news published on {today} or {yesterday} only. Use a date-specific query like "Miami Dolphins {today}" to find the most recent articles. Focus on si.com, miamiherald.com, sun-sentinel.com, theathletic.com and palmbeachpost.com. Ignore anything older than 48 hours.
 
 NewsAPI articles:
 {news_text}
