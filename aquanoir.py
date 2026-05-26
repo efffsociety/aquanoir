@@ -374,6 +374,8 @@ def should_run_web_search():
         if last_run.tzinfo is None:
             last_run = last_run.replace(tzinfo=timezone.utc)
         hours_since = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
+        hours_until = max(0, 6 - hours_since)
+        print(f"Hours since last web search: {hours_since:.1f} — next in {hours_until:.1f}hrs")
         return hours_since >= 6
     except Exception:
         return True
@@ -410,6 +412,7 @@ def generate_posts(articles, log):
 
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     use_web_search = should_run_web_search()
+    print(f"Web search due: {use_web_search}")
 
     if use_web_search:
         print("Running web search cycle (6hr)...")
