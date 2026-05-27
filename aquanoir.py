@@ -249,19 +249,21 @@ def save_log(log):
         json.dump(log[-500:], f, indent=2)  # keep last 500
 
 
-def story_id(text):
-    """Fingerprint a story so we never repost it."""
+def story_id(url, text):
+    """Fingerprint a story by URL first, fall back to text hash."""
+    if url:
+        return hashlib.md5(url.strip().encode()).hexdigest()
     return hashlib.md5(text.strip()[:120].encode()).hexdigest()
 
 
-def already_posted(log, text):
-    sid = story_id(text)
+def already_posted(log, text, url=""):
+    sid = story_id(url, text)
     return any(entry.get("id") == sid for entry in log)
 
 
 def mark_posted(log, text, url):
     log.append({
-        "id": story_id(text),
+        "id": story_id(url, text),
         "text": text[:100],
         "url": url,
         "date": datetime.now(timezone.utc).isoformat()
@@ -488,7 +490,7 @@ NewsAPI articles:
         fact_text = "\n".join(fact_lines).strip()
 
         if fact_text and url:
-            if not already_posted(log, fact_text):
+            if not already_posted(log, fact_text, url):
                 posts.append({"fact": fact_text, "url": url})
 
     return posts[:3]
