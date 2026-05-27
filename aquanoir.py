@@ -323,6 +323,11 @@ def fetch_news():
                 title = item.findtext("title", "")
                 link = item.findtext("link", "")
                 desc = item.findtext("description", "")
+                # Fix smart quote encoding issues
+                def fix_quotes(s):
+                    return s.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').replace("â", "'").replace(" ", " ")
+                title = fix_quotes(title)
+                desc = fix_quotes(desc)
                 if title and link:
                     articles.append({
                         "title": title,
