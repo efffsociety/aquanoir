@@ -486,9 +486,16 @@ NewsAPI articles:
         print("Claude found no new worthy news.")
         return []
 
-    # Parse POST blocks
+    # Parse POST blocks — handle both "POST:" prefixed and raw output
     posts = []
-    blocks = raw.split("POST:")[1:]
+    
+    # Try splitting on POST: marker first
+    if "POST:" in raw:
+        blocks = raw.split("POST:")[1:]
+    else:
+        # No POST: marker — treat entire output as one block
+        blocks = [raw]
+
     for block in blocks:
         lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
         fact_lines = []
@@ -496,10 +503,12 @@ NewsAPI articles:
         for line in lines:
             if line.startswith("SOURCE_URL:"):
                 url = line.replace("SOURCE_URL:", "").strip()
+            elif line.startswith("#NFL") or line.startswith("#MiamiDolphins") or line.startswith("#FinsUp"):
+                continue  # skip hashtag lines — added by script
             else:
                 fact_lines.append(line)
 
-        fact_text = "\n".join(fact_lines).strip()
+        fact_text = " ".join(fact_lines).strip()
 
         if fact_text and url:
             if not already_posted(log, fact_text, url):
