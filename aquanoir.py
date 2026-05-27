@@ -92,6 +92,13 @@ Rules:
 - Prioritize breaking news and transactions from the last 6 hours above all else. Beat writer features and analysis are acceptable if from the last 48 hours. Anything older should be skipped.
 - Skip pure opinion pieces, rankings and hot takes.
 - Only use these approved sources: miamidolphins.com, nfl.com, si.com, miamiherald.com, sun-sentinel.com, palmbeachpost.com, theathletic.com, espn.com, nflnetwork.com, the33rdteam.com, thedraftnetwork.com, profootballtalk.com, profootballreference.com, nbcsports.com, patmcafeeshow.com. Reject anything from heavy.com, bleacherreport.com, fansided.com, or any fan/aggregator site.
+- RELEVANCE FILTER — only post a story if it meets one of these criteria:
+  1. Involves a current Dolphins player, coach or front office member
+  2. Alumni milestone only — Hall of Fame, death, or major award. Skip all other alumni news.
+  3. Legal or lawsuit story — only if there is an official NFL ruling or penalty that directly affects the current or future team (draft picks, salary cap, ownership). Lawsuit updates with no ruling or consequence should be skipped.
+  4. Off-field conduct — only post if the NFL or Miami Dolphins organization issues an official ruling, penalty, suspension or roster action as a direct result. Never post the underlying incident such as an arrest, allegation or personal behavior. Only the official organizational response.
+  5. Trade rumors — only post if two or more approved beat reporters have independently reported the same rumor. Single source speculation should be skipped.
+- If a story does not clearly meet one of the above criteria, skip it.
 - For secondary sources (PFT/Mike Florio, NBC Sports/Chris Simms, Pat McAfee Show, Rich Eisen/NFL Network) only post if the content is a confirmed story break or transaction. Never post their analysis or opinions.
 - Generate one POST per distinct news item.
 - Max 3 posts per run.
@@ -99,7 +106,7 @@ Rules:
 - Never use hyphens or em dashes.
 - Never use Oxford commas.
 - Keep sentence structure direct and clean.
-- If an article is a follow-up to a story already in the posted log, only post it if it contains meaningful new facts of any kind. New details, a confirmation, a reversal, additional context that changes the story. If it is just rehashing the same information, skip it.
+- If an article covers the same underlying event or news as something already in the posted log — even from a different outlet — skip it. The test is whether the underlying fact is new, not whether the URL or outlet is new. For example if Manny Fernandez passing away was already posted from miamidolphins.com, do not post the same news from sun-sentinel.com.
 - When posting a meaningful follow-up, start the post with "Update:" instead of 🐬. No emoji on updates.
 
 Output only the POST blocks. No other text."""
@@ -264,7 +271,7 @@ def already_posted(log, text, url=""):
 def mark_posted(log, text, url):
     log.append({
         "id": story_id(url, text),
-        "text": text[:100],
+        "text": text[:200],
         "url": url,
         "date": datetime.now(timezone.utc).isoformat()
     })
