@@ -2,7 +2,6 @@
 """
 Aqua Noir — Miami Dolphins Intelligence Digest
 Posts to @aquanoirr.bsky.social via AT Protocol
-Runs daily at noon via cron
 """
 
 import os
@@ -508,11 +507,14 @@ NewsAPI articles:
             else:
                 fact_lines.append(line)
 
-        fact_text = " ".join(fact_lines).strip()
+        fact_text = " ".join(l for l in fact_lines if l).strip()
 
         if fact_text and url:
+            print(f"Candidate post: {fact_text[:80]} | URL: {url[:50]}")
             if not already_posted(log, fact_text, url):
                 posts.append({"fact": fact_text, "url": url})
+            else:
+                print("Skipped — already posted")
 
     return posts[:3]
 
