@@ -44,6 +44,7 @@ APPROVED_SOURCES = [
     "thedraftnetwork.com", # Kyle Crabbs
     "profootballtalk.com", # Mike Florio — facts and transactions only
     "profootballreference.com",
+    "pff.com",              # PFF Dolphins feed
     "nbcsports.com",       # Chris Simms — confirmed news only
     "patmcafeeshow.com",   # Pat McAfee — confirmed news/story breaks only
 ]
