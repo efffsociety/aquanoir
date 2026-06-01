@@ -315,9 +315,8 @@ def fetch_news():
     import xml.etree.ElementTree as ET
     rss_feeds = [
         "https://www.miamidolphins.com/rss/news",
-        "https://www.profootballtalk.com/feed/",
-        "https://www.espn.com/espn/rss/nfl/news",
-        "https://www.nfl.com/rss/rsslanding?searchString=miami+dolphins",
+        "https://www.espn.com/espn/rss/nfl/news?teamId=15",
+        "https://pff.com/feed/teams/17",
     ]
     for feed_url in rss_feeds:
         try:
