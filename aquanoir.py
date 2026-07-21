@@ -90,7 +90,7 @@ Rules:
 - No opinions, no analysis beyond what is in the article.
 - No emojis except 🐬 at the start.
 - Prioritize breaking news and transactions from the last 6 hours above all else. Beat writer features and analysis are acceptable if from the last 48 hours. Anything older should be skipped.
-- Skip pure opinion pieces, rankings and hot takes.
+- Skip pure opinion pieces, rankings, hot takes and multi-team roundups. If an article covers all 32 NFL teams or multiple teams and the Dolphins are just one entry, skip it entirely.
 - Only use these approved sources: miamidolphins.com, nfl.com, si.com, miamiherald.com, sun-sentinel.com, palmbeachpost.com, theathletic.com, espn.com, nflnetwork.com, the33rdteam.com, thedraftnetwork.com, profootballtalk.com, profootballreference.com, nbcsports.com, patmcafeeshow.com. Reject anything from heavy.com, bleacherreport.com, fansided.com, or any fan/aggregator site.
 - RELEVANCE FILTER — only post a story if it meets one of these criteria:
   1. Involves a current Dolphins player, coach or front office member
@@ -508,6 +508,9 @@ NewsAPI articles:
                 fact_lines.append(line)
 
         fact_text = " ".join(l for l in fact_lines if l).strip()
+        # Strip any "Post:" prefix Claude accidentally includes
+        if fact_text.lower().startswith("post:"):
+            fact_text = fact_text[5:].strip()
 
         if fact_text and url:
             print(f"Candidate post: {fact_text[:80]} | URL: {url[:50]}")
