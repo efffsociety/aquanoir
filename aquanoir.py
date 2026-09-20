@@ -7,8 +7,10 @@ Posts to @aquanoirr.bsky.social via AT Protocol
 import os
 import json
 import time
+import re
 import hashlib
 import requests
+from html import unescape
 from datetime import datetime, timezone, timedelta
 from anthropic import Anthropic
 
@@ -864,27 +866,131 @@ def maybe_post_kickoff(session, log, event):
 
 
 # ── Game day inactives ───────────────────────────────────────────────────────
+#
+# Source: the weekly "NFL inactives" article on NFL.com. TheSportsDB has no NFL lineup
+# data, so the bot finds that article with a web search limited to nfl.com (only the
+# result URLs are used), then parses the page itself. No model writes the player names,
+# and the thread only posts when both teams' lists are found in the section for this
+# exact game.
 
-def get_inactives(team_name, event_id):
-    """
-    Fetch inactives and game day elevations for a team.
-    Uses TheSportsDB lineup endpoint — falls back to NewsAPI search if unavailable.
-    """
+NFL_INACTIVES_URL_RE = re.compile(r"^https://www\.nfl\.com/news/[^\s?#]*inactives[^\s?#]*$")
+NFL_FETCH_HEADERS = {"User-Agent": "Mozilla/5.0"}
+MIN_INACTIVES_PER_TEAM = 3   # every team deactivates 7 or so; fewer means a partial page
+
+
+def _nickname(full_team_name):
+    """'San Francisco 49ers' -> '49ers'."""
+    parts = (full_team_name or "").strip().split()
+    return parts[-1].lower() if parts else ""
+
+
+def _clean_html_text(fragment):
+    return " ".join(unescape(re.sub(r"<[^>]+>", "", fragment)).split())
+
+
+def _season_year(event):
+    """NFL season year used in NFL.com game links. January games belong to the prior season."""
+    match = re.match(r"\d{4}", str(event.get("strSeason") or ""))
+    if match:
+        return match.group()
+    date_str = event.get("dateEvent") or ""
     try:
-        res = requests.get(
-            f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_KEY}/lookuplineupevent.php",
-            params={"id": event_id},
-            timeout=10
+        year, month = int(date_str[:4]), int(date_str[5:7])
+        return str(year - 1 if month <= 2 else year)
+    except ValueError:
+        return ""
+
+
+def find_inactives_article_urls(event):
+    """
+    Ask Claude web search (nfl.com only) where the weekly inactives article is.
+    Only the URLs in the search results are used, never text the model writes.
+    """
+    kickoff = parse_kickoff_utc(event)
+    day = to_eastern(kickoff).strftime("%A %B %-d %Y") if kickoff else event.get("dateEvent", "")
+    try:
+        client = Anthropic(api_key=ANTHROPIC_KEY)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 2,
+                "allowed_domains": ["nfl.com"],
+            }],
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Find the NFL.com article that lists the NFL inactives (players ruled out) "
+                    f"for games on {day}. Search for: NFL inactives players ruled out {day}. "
+                    f"Reply with one short sentence."
+                ),
+            }],
         )
-        res.raise_for_status()
-        data = res.json()
-        lineup = data.get("lineup") or []
-        inactives = [p["strPlayer"] for p in lineup if p.get("strStatus", "").lower() == "inactive"]
-        elevations = [p["strPlayer"] for p in lineup if "elevation" in p.get("strStatus", "").lower()]
-        return inactives, elevations
     except Exception as e:
-        print(f"Inactives fetch error for {team_name}: {e}")
-        return [], []
+        print(f"Inactives article search error: {e}")
+        return []
+
+    urls = []
+    for block in message.content:
+        if getattr(block, "type", "") != "web_search_tool_result":
+            continue
+        results = getattr(block, "content", None)
+        if not isinstance(results, list):
+            continue   # an error object instead of results
+        for result in results:
+            url = getattr(result, "url", "") or ""
+            if NFL_INACTIVES_URL_RE.match(url) and url not in urls:
+                urls.append(url)
+    print(f"Inactives article candidates: {urls}")
+    return urls
+
+
+def parse_nfl_inactives(page, event):
+    """
+    Pull both teams' inactives for this game out of an NFL.com weekly inactives article.
+    Returns {full team name: [entries]} or None. Every check has to pass: the two team
+    blocks sit next to each other, the section links to this exact game (guards against a
+    rematch listed in another week's article) and each team has a plausible entry count.
+    """
+    home = event.get("strHomeTeam", "")
+    away = event.get("strAwayTeam", "")
+    if not home or not away:
+        return None
+    game_slug = f"{_nickname(away)}-at-{_nickname(home)}-{_season_year(event)}"
+
+    blocks = []   # (position, team heading in lower case, [entries])
+    for m in re.finditer(r"<h3>([^<]*)</h3>\s*<ul>(.*?)</ul>", page, re.S):
+        entries = [_clean_html_text(li) for li in re.findall(r"<li>(.*?)</li>", m.group(2), re.S)]
+        blocks.append((m.start(), _clean_html_text(m.group(1)).lower(), [e for e in entries if e]))
+
+    names = {_nickname(home): home, _nickname(away): away}
+    for first, second in zip(blocks, blocks[1:]):
+        if {first[1], second[1]} != set(names):
+            continue
+        if game_slug not in page[max(0, first[0] - 6000):first[0]]:
+            continue
+        if min(len(first[2]), len(second[2])) < MIN_INACTIVES_PER_TEAM:
+            continue
+        return {names[first[1]]: first[2], names[second[1]]: second[2]}
+    return None
+
+
+def get_verified_inactives(event):
+    """Return ({team: [entries]}, article_url) for this game, or (None, None)."""
+    for url in find_inactives_article_urls(event):
+        try:
+            res = requests.get(url, timeout=15, headers=NFL_FETCH_HEADERS)
+            res.raise_for_status()
+        except Exception as e:
+            print(f"Inactives article fetch error for {url}: {e}")
+            continue
+        parsed = parse_nfl_inactives(res.text, event)
+        if parsed:
+            return parsed, url
+        print(f"This game's inactives were not found or verified at {url}")
+    return None, None
 
 
 def build_inactives_post(team_name, inactives, elevations):
@@ -903,9 +1009,9 @@ def build_inactives_post(team_name, inactives, elevations):
 
 def maybe_post_inactives(session, log, event):
     """
-    Post the inactives thread once, inside the window before kickoff. Inactives are
-    official about 90 minutes before kickoff, so if the lineup is not published yet
-    the run exits without logging and tries again on the next cycle.
+    Post the inactives thread once, inside the window before kickoff. Inactives become
+    official about 90 minutes before kickoff, so if the NFL.com article does not have this
+    game yet the run exits without logging and tries again on the next cycle.
     """
     if not event:
         return
@@ -926,20 +1032,21 @@ def maybe_post_inactives(session, log, event):
         return
     print(f"Kickoff in {minutes_until:.0f} min (inactives window {low} to {high}).")
 
-    event_id = event.get("idEvent", "")
+    inactives, source_url = get_verified_inactives(event)
+    if not inactives:
+        print("Inactives not published or not verified yet; will retry next cycle.")
+        return
+
     home_team = event.get("strHomeTeam", "")
     away_team = event.get("strAwayTeam", "")
 
     # Determine which is Dolphins and which is opponent
     dolphins_name = "Miami Dolphins"
     opponent_name = home_team if away_team == dolphins_name else away_team
-
-    # Fetch inactives for both teams
-    dolphins_inactives, dolphins_elevations = get_inactives(dolphins_name, event_id)
-    opponent_inactives, opponent_elevations = get_inactives(opponent_name, event_id)
-
-    if not (dolphins_inactives or dolphins_elevations or opponent_inactives or opponent_elevations):
-        print("Inactives not published yet; will retry next cycle.")
+    dolphins_list = inactives.get(dolphins_name)
+    opponent_list = inactives.get(opponent_name)
+    if not dolphins_list or not opponent_list:
+        print("Dolphins or opponent list missing after parsing; skipping.")
         return
 
     # Thread under the kickoff post when it exists, otherwise post a standalone thread
@@ -951,26 +1058,42 @@ def maybe_post_inactives(session, log, event):
     jwt, did = session.get()
 
     # Post Dolphins inactives
-    dolphins_text = build_inactives_post("Dolphins", dolphins_inactives, dolphins_elevations)
+    dolphins_text = build_inactives_post("Dolphins", dolphins_list, [])
     if threaded:
         root = {"uri": kickoff_entry["uri"], "cid": kickoff_entry["cid"]}
         result1 = bsky_post(jwt, did, dolphins_text, reply_to={"root": root, "parent": root})
     else:
         result1 = bsky_post(jwt, did, dolphins_text)
         root = {"uri": result1["uri"], "cid": result1["cid"]}
-    time.sleep(2)
 
-    # Post opponent inactives as a reply to the Dolphins inactives
-    opponent_text = build_inactives_post(opponent_name, opponent_inactives, opponent_elevations)
-    reply_ref = {
-        "root": root,
-        "parent": {"uri": result1["uri"], "cid": result1["cid"]}
-    }
-    bsky_post(jwt, did, opponent_text, reply_to=reply_ref)
-
-    # Log it
+    # Log as soon as the first post is out so a later failure can never cause a repost
     log.append({"id": inactives_key, "date": datetime.now(timezone.utc).isoformat()})
-    print(f"Posted inactives for {dolphins_name} and {opponent_name}.")
+    print(f"Posted Dolphins inactives ({len(dolphins_list)} players).")
+
+    try:
+        time.sleep(2)
+
+        # Opponent inactives as a reply to the Dolphins inactives
+        opponent_text = build_inactives_post(opponent_name, opponent_list, [])
+        result2 = bsky_post(jwt, did, opponent_text, reply_to={
+            "root": root,
+            "parent": {"uri": result1["uri"], "cid": result1["cid"]},
+        })
+        print(f"Posted {opponent_name} inactives ({len(opponent_list)} players).")
+
+        # Source link with card preview, same as the news posts
+        time.sleep(2)
+        try:
+            link_card = fetch_link_card(source_url)
+        except Exception as e:
+            print(f"Link card error: {e}")
+            link_card = None
+        bsky_post(jwt, did, source_url, reply_to={
+            "root": root,
+            "parent": {"uri": result2["uri"], "cid": result2["cid"]},
+        }, embed=link_card)
+    except Exception as e:
+        print(f"Inactives thread partly posted, error on a later reply: {e}")
 
 
 # ── Beat writer check ────────────────────────────────────────────────────────
