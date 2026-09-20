@@ -670,12 +670,71 @@ def get_dolphins_game_today():
     return None
 
 
-def get_weather(lat, lon):
-    """Fetch current weather for stadium location."""
+def _format_weather(temp, description, wind_speed, wind_deg, pop=None):
+    """Build the weather line. Returns {"line": post text, "desc": condition text}."""
+    directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    wind_dir = directions[round(wind_deg / 45) % 8]
+    line = f"{round(temp)}°F · {description.capitalize()} · Wind {round(wind_speed)} mph {wind_dir}"
+    already_precip = any(w in description.lower() for w in ("rain", "drizzle", "shower", "snow", "thunder", "storm"))
+    if pop is not None and pop >= 0.2 and not already_precip:
+        line += f" · {round(pop * 100)}% rain"
+    return {"line": line, "desc": description}
+
+
+def _fetch_forecast_slot(lat, lon, kickoff):
+    """
+    Return the 3 hour forecast slot closest to kickoff (aware UTC datetime), or None
+    if kickoff is more than 3 hours beyond what the forecast covers.
+    """
+    res = requests.get(
+        "https://api.openweathermap.org/data/2.5/forecast",
+        params={
+            "lat": lat,
+            "lon": lon,
+            "appid": WEATHER_KEY,
+            "units": "imperial",
+            "cnt": 24          # 72 hours of 3 hour slots
+        },
+        timeout=10
+    )
+    res.raise_for_status()
+    slots = res.json().get("list") or []
+    if not slots:
+        return None
+    target = kickoff.timestamp()
+    best = min(slots, key=lambda s: abs(s["dt"] - target))
+    if abs(best["dt"] - target) > 3 * 3600:
+        return None
+    return best
+
+
+def get_weather(lat, lon, kickoff=None):
+    """
+    Weather for a stadium. When kickoff (aware UTC datetime) is given, use the forecast
+    slot closest to kickoff so the post reflects game time conditions. If the forecast
+    is unavailable, fall back to current conditions.
+    Returns {"line": ..., "desc": ...} or None.
+    """
     if not WEATHER_KEY:
         print("WEATHER_API_KEY not set; skipping weather.")
         return None
     try:
+        if kickoff is not None:
+            try:
+                slot = _fetch_forecast_slot(lat, lon, kickoff)
+            except Exception as e:
+                print(f"Forecast fetch error: {e}; falling back to current conditions.")
+                slot = None
+            if slot:
+                return _format_weather(
+                    slot["main"]["temp"],
+                    slot["weather"][0]["description"],
+                    slot["wind"]["speed"],
+                    slot["wind"].get("deg", 0),
+                    slot.get("pop"),
+                )
+            print("No forecast slot near kickoff; using current conditions.")
+
         res = requests.get(
             "https://api.openweathermap.org/data/2.5/weather",
             params={
@@ -688,13 +747,12 @@ def get_weather(lat, lon):
         )
         res.raise_for_status()
         data = res.json()
-        temp = round(data["main"]["temp"])
-        desc = data["weather"][0]["description"].capitalize()
-        wind = round(data["wind"]["speed"])
-        wind_deg = data["wind"].get("deg", 0)
-        directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-        wind_dir = directions[round(wind_deg / 45) % 8]
-        return f"{temp}°F · {desc} · Wind {wind} mph {wind_dir}"
+        return _format_weather(
+            data["main"]["temp"],
+            data["weather"][0]["description"],
+            data["wind"]["speed"],
+            data["wind"].get("deg", 0),
+        )
     except Exception as e:
         print(f"Weather fetch error: {e}")
         return None
@@ -743,10 +801,10 @@ def build_kickoff_post(event):
     weather_line = ""
     coords = find_coords(venue)
     if coords:
-        weather_raw = get_weather(coords[0], coords[1])
-        if weather_raw:
-            emoji = get_weather_emoji(weather_raw)
-            weather_line = f"{emoji} {weather_raw}"
+        weather = get_weather(coords[0], coords[1], kickoff)
+        if weather:
+            emoji = get_weather_emoji(weather["desc"])
+            weather_line = f"{emoji} {weather['line']}"
     else:
         print(f"No stadium coordinates for venue {venue!r}; skipping weather.")
 
@@ -764,9 +822,10 @@ def build_kickoff_post(event):
     ]
     if weather_line:
         lines.append(weather_line)
-    lines.extend(["", tv_display])
+    if tv_display:
+        lines.extend(["", tv_display])
 
-    return "\n".join(lines)
+    return "\n".join(lines).strip()
 
 
 def maybe_post_kickoff(session, log, event):
