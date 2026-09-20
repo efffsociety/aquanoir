@@ -9,7 +9,7 @@ import json
 import time
 import hashlib
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from anthropic import Anthropic
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -121,6 +121,19 @@ def bsky_login():
     res.raise_for_status()
     data = res.json()
     return data["accessJwt"], data["did"]
+
+
+class BskySession:
+    """Logs in to Bluesky the first time credentials are needed during a run."""
+
+    def __init__(self):
+        self._auth = None
+
+    def get(self):
+        if self._auth is None:
+            self._auth = bsky_login()
+            print("Logged into Bluesky.")
+        return self._auth
 
 
 def fetch_link_card(url):
@@ -331,7 +344,7 @@ def fetch_news():
                 desc = item.findtext("description", "")
                 # Fix smart quote encoding issues
                 def fix_quotes(s):
-                    return s.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').replace("â", "'").replace(" ", " ")
+                    return s.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"').replace("â", "'").replace(" ", " ")
                 title = fix_quotes(title)
                 desc = fix_quotes(desc)
                 if title and link:
@@ -431,7 +444,6 @@ def generate_posts(articles, log):
         print("Running web search cycle (6hr)...")
         tools = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
         # Get today and yesterday for specific date search
-        from datetime import timedelta
         today = datetime.now(timezone.utc).strftime("%B %d %Y")
         yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%B %d %Y")
 
@@ -487,7 +499,7 @@ NewsAPI articles:
 
     # Parse POST blocks — handle both "POST:" prefixed and raw output
     posts = []
-    
+
     # Try splitting on POST: marker first
     if "POST:" in raw:
         blocks = raw.split("POST:")[1:]
@@ -569,9 +581,75 @@ TV_NETWORKS = {
     "Peacock": "Peacock",
 }
 
+# Game day timing windows, in relation to kickoff. The bot runs about every 30 minutes,
+# so every window must be at least 30 minutes wide or a run can miss it.
+KICKOFF_POST_WINDOW_HOURS = (2.5, 3.5)
+INACTIVES_WINDOW_MINUTES = (70, 110)
+
+
+def _nth_sunday(year, month, n):
+    """Date (midnight, naive) of the nth Sunday of a month. n=1 is the first Sunday."""
+    first = datetime(year, month, 1)
+    days_to_sunday = (6 - first.weekday()) % 7   # weekday(): Monday is 0, Sunday is 6
+    return first + timedelta(days=days_to_sunday + 7 * (n - 1))
+
+
+def to_eastern(dt_utc):
+    """
+    Convert an aware UTC datetime to US Eastern time.
+    Uses the system timezone database when it exists. Slim Docker images often do not
+    ship one, so fall back to the US daylight saving rules (second Sunday of March
+    to first Sunday of November) instead of a hard coded offset.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return dt_utc.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        year = dt_utc.year
+        dst_start = _nth_sunday(year, 3, 2).replace(hour=7, tzinfo=timezone.utc)   # 2 AM EST
+        dst_end = _nth_sunday(year, 11, 1).replace(hour=6, tzinfo=timezone.utc)    # 2 AM EDT
+        offset_hours = -4 if dst_start <= dt_utc < dst_end else -5
+        return dt_utc.astimezone(timezone(timedelta(hours=offset_hours)))
+
+
+def parse_kickoff_utc(event):
+    """Kickoff as an aware UTC datetime, or None. TheSportsDB strTime is in UTC."""
+    date_str = event.get("dateEvent") or ""
+    time_str = event.get("strTime") or ""
+    try:
+        return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def game_key(prefix, event):
+    """Per game log key such as kickoff_2026-09-20, built from the event's own date."""
+    return f"{prefix}_{event.get('dateEvent', '')}"
+
+
+def _normalize_venue(name):
+    return (name or "").replace("’", "'").replace("‘", "'").strip().lower()
+
+
+def find_coords(venue):
+    """Look up stadium coordinates, tolerating case and apostrophe differences."""
+    coords = STADIUM_COORDS.get(venue)
+    if coords:
+        return coords
+    wanted = _normalize_venue(venue)
+    for name, value in STADIUM_COORDS.items():
+        if _normalize_venue(name) == wanted:
+            return value
+    return None
+
+
 def get_dolphins_game_today():
-    """Check if Dolphins play today and return game info."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """
+    Return the next Dolphins game if it kicks off within the next 24 hours, or started
+    within the last 4 hours. This compares kickoff timestamps instead of the UTC calendar
+    date, so night games that cross midnight UTC are still found.
+    """
+    now = datetime.now(timezone.utc)
     try:
         res = requests.get(
             f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_KEY}/eventsnext.php",
@@ -579,10 +657,13 @@ def get_dolphins_game_today():
             timeout=10
         )
         res.raise_for_status()
-        events = res.json().get("events", [])
+        events = res.json().get("events") or []
         for event in events:
-            event_date = event.get("dateEvent", "")
-            if event_date == today:
+            kickoff = parse_kickoff_utc(event)
+            if kickoff is None:
+                continue
+            hours_until = (kickoff - now).total_seconds() / 3600
+            if -4 <= hours_until <= 24:
                 return event
     except Exception as e:
         print(f"Schedule fetch error: {e}")
@@ -592,6 +673,7 @@ def get_dolphins_game_today():
 def get_weather(lat, lon):
     """Fetch current weather for stadium location."""
     if not WEATHER_KEY:
+        print("WEATHER_API_KEY not set; skipping weather.")
         return None
     try:
         res = requests.get(
@@ -643,13 +725,13 @@ def build_kickoff_post(event):
     time_str = event.get("strTime", "")
     network = event.get("strTVStation", "")
 
-    # Format date and time
+    # Format date and time. TheSportsDB gives UTC, so convert to Eastern for display.
     date_str = event.get("dateEvent", "")
-    try:
-        dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
-        formatted_time = dt.strftime("%A %b %-d · %-I:%M %p ET")
-    except Exception:
-        formatted_time = f"{date_str} · {time_str} ET"
+    kickoff = parse_kickoff_utc(event)
+    if kickoff:
+        formatted_time = to_eastern(kickoff).strftime("%A %b %-d · %-I:%M %p ET")
+    else:
+        formatted_time = f"{date_str} · {time_str} UTC"
 
     # Format matchup
     matchup = f"{away_team} @ {home_team}"
@@ -659,12 +741,14 @@ def build_kickoff_post(event):
 
     # Weather
     weather_line = ""
-    coords = STADIUM_COORDS.get(venue)
+    coords = find_coords(venue)
     if coords:
         weather_raw = get_weather(coords[0], coords[1])
         if weather_raw:
             emoji = get_weather_emoji(weather_raw)
             weather_line = f"{emoji} {weather_raw}"
+    else:
+        print(f"No stadium coordinates for venue {venue!r}; skipping weather.")
 
     # TV
     tv_display = TV_NETWORKS.get(network, network)
@@ -685,31 +769,30 @@ def build_kickoff_post(event):
     return "\n".join(lines)
 
 
-def maybe_post_kickoff(jwt, did, log, event):
-    """Post Today's Kickoff if game is today and not yet posted."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    kickoff_key = f"kickoff_{today}"
-
-    # Check if already posted today
-    if any(e.get("id") == kickoff_key for e in log):
-        return
-
+def maybe_post_kickoff(session, log, event):
+    """Post Today's Kickoff once, about 3 hours before kickoff."""
     if not event:
         return
 
-    # Check if we're within 3-4 hours of kickoff
-    time_str = event.get("strTime", "")
-    date_str = event.get("dateEvent", "")
-    try:
-        kickoff = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        hours_until = (kickoff - now).total_seconds() / 3600
-        if not (2.5 <= hours_until <= 3.5):
-            return
-    except Exception:
+    kickoff_key = game_key("kickoff", event)
+
+    # Check if already posted for this game
+    if any(e.get("id") == kickoff_key for e in log):
+        return
+
+    kickoff = parse_kickoff_utc(event)
+    if kickoff is None:
+        print(f"Kickoff time unavailable for event {event.get('idEvent')}; skipping kickoff post.")
+        return
+
+    hours_until = (kickoff - datetime.now(timezone.utc)).total_seconds() / 3600
+    low, high = KICKOFF_POST_WINDOW_HOURS
+    print(f"Kickoff in {hours_until:.2f} hrs (kickoff post window {low} to {high}).")
+    if not (low <= hours_until <= high):
         return
 
     post_text = build_kickoff_post(event)
+    jwt, did = session.get()
     result = bsky_post(jwt, did, post_text)
     log.append({
         "id": kickoff_key,
@@ -736,7 +819,7 @@ def get_inactives(team_name, event_id):
         )
         res.raise_for_status()
         data = res.json()
-        lineup = data.get("lineup", [])
+        lineup = data.get("lineup") or []
         inactives = [p["strPlayer"] for p in lineup if p.get("strStatus", "").lower() == "inactive"]
         elevations = [p["strPlayer"] for p in lineup if "elevation" in p.get("strStatus", "").lower()]
         return inactives, elevations
@@ -759,26 +842,30 @@ def build_inactives_post(team_name, inactives, elevations):
     return "\n".join(lines)
 
 
-def maybe_post_inactives(jwt, did, log, event):
-    """Post inactives thread as replies to the kickoff post — fires ~90 min before kickoff."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    inactives_key = f"inactives_{today}"
+def maybe_post_inactives(session, log, event):
+    """
+    Post the inactives thread once, inside the window before kickoff. Inactives are
+    official about 90 minutes before kickoff, so if the lineup is not published yet
+    the run exits without logging and tries again on the next cycle.
+    """
+    if not event:
+        return
+
+    inactives_key = game_key("inactives", event)
 
     # Check if already posted
     if any(e.get("id") == inactives_key for e in log):
         return
 
-    # Check timing — fire between 80 and 100 minutes before kickoff
-    time_str = event.get("strTime", "")
-    date_str = event.get("dateEvent", "")
-    try:
-        kickoff = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        minutes_until = (kickoff - now).total_seconds() / 60
-        if not (80 <= minutes_until <= 100):
-            return
-    except Exception:
+    kickoff = parse_kickoff_utc(event)
+    if kickoff is None:
         return
+
+    minutes_until = (kickoff - datetime.now(timezone.utc)).total_seconds() / 60
+    low, high = INACTIVES_WINDOW_MINUTES
+    if not (low <= minutes_until <= high):
+        return
+    print(f"Kickoff in {minutes_until:.0f} min (inactives window {low} to {high}).")
 
     event_id = event.get("idEvent", "")
     home_team = event.get("strHomeTeam", "")
@@ -792,31 +879,35 @@ def maybe_post_inactives(jwt, did, log, event):
     dolphins_inactives, dolphins_elevations = get_inactives(dolphins_name, event_id)
     opponent_inactives, opponent_elevations = get_inactives(opponent_name, event_id)
 
-    # Find the kickoff post URI to reply to
-    kickoff_entry = next((e for e in log if e.get("id") == f"kickoff_{today}"), None)
-    if not kickoff_entry or not kickoff_entry.get("uri"):
-        print("Kickoff post URI not found — cannot thread inactives.")
+    if not (dolphins_inactives or dolphins_elevations or opponent_inactives or opponent_elevations):
+        print("Inactives not published yet; will retry next cycle.")
         return
 
-    root_uri = kickoff_entry["uri"]
-    root_cid = kickoff_entry["cid"]
+    # Thread under the kickoff post when it exists, otherwise post a standalone thread
+    kickoff_entry = next((e for e in log if e.get("id") == game_key("kickoff", event)), None)
+    threaded = bool(kickoff_entry and kickoff_entry.get("uri") and kickoff_entry.get("cid"))
+    if not threaded:
+        print("Kickoff post not found; posting inactives as a standalone thread.")
 
-    # Post Dolphins inactives as reply to kickoff
+    jwt, did = session.get()
+
+    # Post Dolphins inactives
     dolphins_text = build_inactives_post("Dolphins", dolphins_inactives, dolphins_elevations)
-    reply_ref = {
-        "root": {"uri": root_uri, "cid": root_cid},
-        "parent": {"uri": root_uri, "cid": root_cid}
-    }
-    result1 = bsky_post(jwt, did, dolphins_text, reply_to=reply_ref)
+    if threaded:
+        root = {"uri": kickoff_entry["uri"], "cid": kickoff_entry["cid"]}
+        result1 = bsky_post(jwt, did, dolphins_text, reply_to={"root": root, "parent": root})
+    else:
+        result1 = bsky_post(jwt, did, dolphins_text)
+        root = {"uri": result1["uri"], "cid": result1["cid"]}
     time.sleep(2)
 
-    # Post opponent inactives as reply to kickoff
+    # Post opponent inactives as a reply to the Dolphins inactives
     opponent_text = build_inactives_post(opponent_name, opponent_inactives, opponent_elevations)
-    reply_ref2 = {
-        "root": {"uri": root_uri, "cid": root_cid},
+    reply_ref = {
+        "root": root,
         "parent": {"uri": result1["uri"], "cid": result1["cid"]}
     }
-    bsky_post(jwt, did, opponent_text, reply_to=reply_ref2)
+    bsky_post(jwt, did, opponent_text, reply_to=reply_ref)
 
     # Log it
     log.append({"id": inactives_key, "date": datetime.now(timezone.utc).isoformat()})
@@ -872,6 +963,26 @@ def run():
     print(f"[{datetime.now().isoformat()}] Aqua Noir running...")
 
     log = load_log()
+    session = BskySession()
+
+    # Game day posts run first on every cycle so they never depend on news volume.
+    # Kickoff post fires about 3 hours before kickoff, inactives about 90 minutes before.
+    try:
+        event = get_dolphins_game_today()
+        if event:
+            print(f"Dolphins game: {event.get('strEvent', '')} at {event.get('dateEvent', '')} {event.get('strTime', '')} UTC")
+            entries_before = len(log)
+            maybe_post_kickoff(session, log, event)
+            maybe_post_inactives(session, log, event)
+            if len(log) != entries_before:
+                save_log(log)
+        else:
+            print("No Dolphins game in the next 24 hours.")
+    except Exception as e:
+        import traceback
+        print(f"Game day error: {e}")
+        print(traceback.format_exc())
+
     articles = fetch_news()
     print(f"Fetched {len(articles)} articles from approved sources.")
 
@@ -888,15 +999,7 @@ def run():
         print("Nothing to post today.")
         return
 
-    jwt, did = bsky_login()
-    print("Logged into Bluesky.")
-
-    # Game day kickoff post — fires 3 hours before kickoff
-    event = get_dolphins_game_today()
-    if event:
-        maybe_post_kickoff(jwt, did, log, event)
-        # Inactives thread — fires 90 min before kickoff
-        maybe_post_inactives(jwt, did, log, event)
+    jwt, did = session.get()
 
     for post in posts:
         try:
